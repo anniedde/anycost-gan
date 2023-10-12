@@ -1,5 +1,6 @@
 # get edit directions for FFHQ models
 import sys
+import PIL
 sys.path.append('.')  # to run from the project root dir
 import torch
 import torch.nn.functional as F
@@ -44,7 +45,7 @@ def get_style_attribute_pairs(network_pkl):  # this function is written with hor
     randomized_noise = False
     truncation_psi = 0.7
     batch_size = 2
-    n_batch = 500000 // (batch_size)
+    n_batch = 10 // (batch_size)
     cam2world_pose = LookAtPoseSampler.sample(3.14/2, 3.14/2, torch.tensor([0, 0, 0], device=device), radius=2.7, device=device)
     intrinsics = torch.tensor([[4.2647, 0, 0.5], [0, 4.2647, 0.5], [0, 0, 1]], device=device)
     cam_pivot = torch.tensor(generator.rendering_kwargs.get('avg_camera_pivot', [0, 0, 0]), device=device)
@@ -59,29 +60,13 @@ def get_style_attribute_pairs(network_pkl):  # this function is written with hor
     #mean_style = generator.mean_style(100000).view(1, 1, -1)
     assert space in ['w', 'w+', 'z']
     for i in tqdm(range(n_batch)):
-        print(i)
         z = torch.randn(1, generator.z_dim, device=device)
 
         w = generator.mapping(z, conditioning_params, truncation_psi=truncation_psi, truncation_cutoff=14)
         images = generator.synthesis(w, camera_params, noise_mode='const')['image']#.detach()
-        
-        images = F.interpolate(images.clamp(-1, 1), size=256, mode='bilinear', align_corners=True)
-        attr = predictor(images)
-        # move to cpu to save memory
-        if space == 'w+':
-            styles.append(w.to('cpu'))
-        elif space == 'w':
-            styles.append(w.mean(1, keepdim=True).to('cpu'))  # originally duplicated
-        else:
-            styles.append(z.to('cpu'))
-        attributes.append(attr.to('cpu'))
-
-    styles = torch.cat(styles, dim=0)
-    attributes = torch.cat(attributes, dim=0)
-
-    torch.save(attributes, 'attributes_{}.pt'.format(config))
-    torch.save(styles, 'styles_{}.pt'.format(config))
-
+        images = (images.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
+        #images = torch.cat(images, dim=2)
+        PIL.Image.fromarray(images[0].cpu().numpy(), 'RGB').save(f'image_{i}.png')
 
 def extract_boundaries():
     styles = torch.load('styles_{}.pt'.format(config))
@@ -131,6 +116,6 @@ def project_boundaries():  # only project the ones used for demo
 if __name__ == '__main__':
     network_pkl = '/playpen-nas-ssd/awang/mystyle/trained_models/barack_no_lora.pkl'
 
-    #get_style_attribute_pairs(network_pkl)
-    extract_boundaries()
+    get_style_attribute_pairs(network_pkl)
+    #extract_boundaries()
     # project_boundaries()
